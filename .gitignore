@@ -1,0 +1,17 @@
+# Python bytecode and cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environments
+.venv/
+venv/
+ENV/
+
+# IDE & Editor files
+.vscode/
+.idea/
+
+# Saved plots/images or raw CSV outputs
+*.csv
+*.png
