@@ -1,146 +1,60 @@
+import streamlit as st
 import matplotlib.pyplot as plt
-import numpy as np
-import pandas as pd
-import requests
-import yfinance as yf
+from core_analytics import fetch_and_process_fx_data
 
-# =====================================================================
-# 1. Data Ingestion and API Selection
-# =====================================================================
-# Define the currency pairs and time period
-currency_pairs = ["EURUSD=X"]
-
-# Download 2 years of daily data (2y provides enough history for 252-day percentiles)
-df = yf.download(currency_pairs, period="2y", interval="1d")
-
-# Flatten MultiIndex columns returned by yfinance if present
-if isinstance(df.columns, pd.MultiIndex):
-    df.columns = df.columns.droplevel(1)
-
-# Drop volume column cleanly
-if "Volume" in df.columns:
-    df = df.drop(columns=["Volume"])
-
-# Display OHLC data
-print("--- HEAD DATA ---")
-print(df.head())
-
-# Check for missing values
-print("\n--- MISSING VALUES CHECK ---")
-print(df.isnull().sum())
-
-
-# =====================================================================
-# 2. Calculate ATR (Average True Range) & Data Architecture
-# =====================================================================
-high = df["High"]
-low = df["Low"]
-prev_close = df["Close"].shift(1)
-
-# The 3 components of True Range
-tr1 = high - low
-tr2 = (high - prev_close).abs()
-tr3 = (low - prev_close).abs()
-
-# The True Range is the maximum of the three components for each row
-df["True_Range"] = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
-
-# 14-day Wilder's ATR
-period = 14
-df["ATR"] = (
-    df["True_Range"]
-    .ewm(alpha=1 / period, min_periods=period, adjust=False)
-    .mean()
+# Page Configuration
+st.set_page_config(
+    page_title="FX Volatility & ATR Tracker",
+    page_icon="📈",
+    layout="wide"
 )
 
-# Normalizing Volatility (% of Spot Price)
-df["Volatility_Pct"] = (df["ATR"] / df["Close"]) * 100
+st.title("📈 FX Volatility & Rolling ATR Tracker")
+st.markdown("Analyze currency pair volatility, ATR percentiles, and regime shifts in real time.")
 
+# Sidebar Controls
+st.sidebar.header("Market Controls")
+ticker_choice = st.sidebar.selectbox("Currency Pair", ["EURUSD=X", "GBPUSD=X", "USDJPY=X", "AUDUSD=X"])
+period_choice = st.sidebar.selectbox("Historical Lookback", ["1y", "2y", "5y"], index=1)
 
-# =====================================================================
-# 3. Key Analytical Features to Build
-# =====================================================================
+# Cached Data Pipeline (prevents reloading on every click)
+@st.cache_data(ttl=3600)
+def load_data(ticker, period):
+    return fetch_and_process_fx_data(ticker, period)
 
-# Feature 3A: Volatility Percentile Rank & Regime Detection
-rank_window = 252  # 252 trading days = 1 calendar year
+with st.spinner("Fetching and processing market data..."):
+    df = load_data(ticker_choice, period_choice)
 
-df["ATR_Percentile"] = (
-    df["ATR"]
-    .rolling(window=rank_window, min_periods=rank_window)
-    .rank(pct=True)
-    * 100
-)
+# Latest Analytics Summary Cards
+latest = df.iloc[-1]
+col1, col2, col3, col4 = st.columns(4)
 
+col1.metric("Latest Close", f"{float(latest['Close']):.4f}")
+col2.metric("14-Day ATR", f"{float(latest['ATR']):.4f}")
+col3.metric("Volatility Regime", str(latest["Volatility_Regime"]))
+col4.metric("ATR Ratio (5/50)", f"{float(latest['ATR_Ratio']):.2f}")
 
-def categorize_regime(pct):
-    if pd.isna(pct):
-        return None
-    elif pct >= 80:
-        return "High Volatility"
-    elif pct <= 20:
-        return "Volatility Squeeze"
-    else:
-        return "Normal Volatility"
+# Display Raw Head Data Expandable Section
+with st.expander("View Recent Analytics Table"):
+    st.dataframe(df[["Close", "ATR", "Volatility_Pct", "ATR_Percentile", "Volatility_Regime", "ATR_Ratio"]].tail(10))
 
-
-df["Volatility_Regime"] = df["ATR_Percentile"].apply(categorize_regime)
-
-# Feature 3B: Volatility Ratio Analysis (Short-term vs. Long-term ATR)
-atr_short_period = 5
-atr_long_period = 50
-
-df["ATR_5"] = (
-    df["True_Range"]
-    .ewm(alpha=1 / atr_short_period, min_periods=atr_short_period, adjust=False)
-    .mean()
-)
-
-df["ATR_50"] = (
-    df["True_Range"]
-    .ewm(alpha=1 / atr_long_period, min_periods=atr_long_period, adjust=False)
-    .mean()
-)
-
-# Ratio > 1.0 = Volatility Expansion | Ratio < 1.0 = Volatility Contraction
-df["ATR_Ratio"] = df["ATR_5"] / df["ATR_50"]
-
-# Output key metrics
-print("\n--- LATEST ANALYTICS OUTPUT ---")
-print(
-    df[
-        [
-            "Close",
-            "ATR",
-            "Volatility_Pct",
-            "ATR_Percentile",
-            "Volatility_Regime",
-            "ATR_Ratio",
-        ]
-    ].tail(10)
-)
-
-
-# =====================================================================
-# 4. Code Architecture & Project Design (Visual Plot Output)
-# =====================================================================
-# Plotting Price vs ATR and Volatility Regimes
+# Plotting Price vs ATR
+st.subheader("Price Action & Volatility Regime Visualization")
 fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8), sharex=True)
 
-# Top Chart: EUR/USD Price
-ax1.plot(df.index, df["Close"], label="EUR/USD Close", color="blue")
-ax1.set_title("EUR/USD Price vs. Rolling ATR Volatility")
+ax1.plot(df.index, df["Close"], label=f"{ticker_choice} Close", color="#1f77b4")
+ax1.set_title(f"{ticker_choice} Price vs. Rolling ATR Volatility")
 ax1.set_ylabel("Price")
-ax1.grid(True)
+ax1.grid(True, alpha=0.3)
 ax1.legend(loc="upper left")
 
-# Bottom Chart: 14-Day ATR
-ax2.plot(df.index, df["ATR"], label="14-Day ATR", color="orange")
+ax2.plot(df.index, df["ATR"], label="14-Day Wilder's ATR", color="#ff7f0e")
 ax2.set_title("14-Period Average True Range (ATR)")
 ax2.set_xlabel("Date")
 ax2.set_ylabel("ATR Range")
-ax2.grid(True)
+ax2.grid(True, alpha=0.3)
 ax2.legend(loc="upper left")
 
 plt.tight_layout()
-plt.show()
+st.pyplot(fig)
 

@@ -14,4 +14,3 @@ ENV/
 
 # Saved plots/images or raw CSV outputs
 *.csv
-*.png
