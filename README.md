@@ -19,7 +19,7 @@ A Python-based quantitative analytics tool designed to measure, track, and categ
 
 ![FX Volatility Chart](chart_preview.png)
 ---
-
+🔗 **Live Web Application:** [FX Volatility & Rolling ATR Tracker](https://fx-volatility-rolling-atr-tracker-nkuwgit7inh3cmifwlkqkm.streamlit.app/)
 ## 🛠️ Project Structure
 
 ```text
